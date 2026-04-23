@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/domain_fronter.dart';
 import '../services/proxy_server.dart';
 import '../services/certificate_manager.dart';
@@ -8,7 +10,7 @@ import '../services/certificate_manager.dart';
 enum VpnState { disconnected, connecting, connected, error }
 
 class VpnProvider extends ChangeNotifier {
-  static const _channel = MethodChannel('moz_pn/vpn');
+  static const _channel = MethodChannel('com.example.moz_pn/vpn');
   
   VpnState _state = VpnState.disconnected;
   String _scriptId = '';
@@ -31,6 +33,26 @@ class VpnProvider extends ChangeNotifier {
     _scriptId = prefs.getString('script_id') ?? '';
     _authPassword = prefs.getString('auth_password') ?? '';
     notifyListeners();
+  }
+
+  Future<void> stopVpn() async {
+    await _stopVpn();
+  }
+
+  Future<void> installCertificate() async {
+    try {
+      final certManager = CertificateManager();
+      final directory = await getApplicationDocumentsDirectory();
+      final certPath = '${directory.path}/ca_cert.pem';
+      
+      // Ensure cert is generated
+      await certManager.getCACertPem();
+
+      await _channel.invokeMethod('installCA', {'path': certPath});
+    } catch (e) {
+      _errorMessage = "خطا در نصب گواهینامه: $e";
+      notifyListeners();
+    }
   }
 
   Future<void> saveSettings(String id, String password) async {

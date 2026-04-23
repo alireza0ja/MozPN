@@ -83,7 +83,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 },
               ),
             ),
-            const SizedBox(height: 60),
+            const SizedBox(height: 40),
+            Consumer<VpnProvider>(
+              builder: (context, provider, child) {
+                return _buildInstallCAButton(context, provider);
+              },
+            ),
+            const SizedBox(height: 40),
             Consumer<VpnProvider>(
               builder: (context, provider, child) {
                 return _buildStatusText(provider);
@@ -92,6 +98,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildInstallCAButton(BuildContext context, VpnProvider provider) {
+    return Column(
+      children: [
+        OutlinedButton.icon(
+          onPressed: () => provider.installCertificate(),
+          icon: const Icon(Icons.verified_user_outlined, size: 18),
+          label: const Text('نصب گواهینامه امنیتی'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFFFD300),
+            side: const BorderSide(color: Color(0xFFFFD300), width: 1),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Text(
+            'برای دور زدن محدودیت‌های شدید، نصب گواهینامه الزامی است. این گواهینامه فقط برای رمزگشایی ترافیک عبوری از VPN شما استفاده می‌شود.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF444444), fontSize: 11),
+          ),
+        ),
+      ],
     );
   }
 
