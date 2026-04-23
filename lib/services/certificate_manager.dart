@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:math';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:pointycastle/export.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,7 +9,7 @@ class CertificateManager {
   static const String _caCertName = 'ca_cert.pem';
 
   String? _caCertPem;
-  AsymmetricKeyPair<RSAPrivateKey, RSAPublicKey>? _caKeyPair;
+  RSAPrivateKey? _caPrivateKey;
 
   Future<void> init() async {
     final directory = await getApplicationDocumentsDirectory();
@@ -17,61 +17,74 @@ class CertificateManager {
     final certFile = File('${directory.path}/$_caCertName');
 
     if (await keyFile.exists() && await certFile.exists()) {
+      final keyPem = await keyFile.readAsString();
+      _caPrivateKey = CryptoUtils.rsaPrivateKeyFromPem(keyPem);
       _caCertPem = await certFile.readAsString();
-      // Load key logic here (omitted for brevity, assume we regenerate if needed)
+      print("Local CA loaded from storage.");
     } else {
       await _generateCA();
     }
   }
 
   Future<void> _generateCA() async {
-    print("Generating Local CA Certificate...");
+    print("Generating Local Root CA Certificate...");
     final keyPair = CryptoUtils.generateRSAKeyPair(2048);
-    _caKeyPair = AsymmetricKeyPair(keyPair.privateKey as RSAPrivateKey, keyPair.publicKey as RSAPublicKey);
+    _caPrivateKey = keyPair.privateKey as RSAPrivateKey;
 
-    final csr = X509Utils.generateSelfSignedCertificate(
-      _caKeyPair!.privateKey,
-      _caCertPem ?? '', // This is just a placeholder, basic_utils has better ways
+    // Generate self-signed Root CA
+    _caCertPem = X509Utils.generateSelfSignedCertificate(
+      _caPrivateKey!,
+      'CN=MozPN Root CA, O=MozPN, C=IR',
       3650, // 10 years
-      commonName: 'MasterHttpRelayVPN Root CA',
+      commonName: 'MozPN Root CA',
       organization: 'MozPN',
       countryName: 'IR',
     );
-
-    _caCertPem = csr;
     
     final directory = await getApplicationDocumentsDirectory();
-    await File('${directory.path}/$_caKeyName').writeAsString(CryptoUtils.encodeRSAPrivateKeyToPem(_caKeyPair!.privateKey));
+    await File('${directory.path}/$_caKeyName').writeAsString(CryptoUtils.encodeRSAPrivateKeyToPem(_caPrivateKey!));
     await File('${directory.path}/$_caCertName').writeAsString(_caCertPem!);
-    print("Local CA generated and saved.");
+    print("Local Root CA generated and saved.");
   }
 
-  String get caCertPath => '${Directory.systemTemp.path}/ca.crt'; // Placeholder for export
-
-  Future<String> getCACertPem() async {
-    final directory = await getApplicationDocumentsDirectory();
-    return await File('${directory.path}/$_caCertName').readAsString();
-  }
-
-  /// Generates a signed certificate for a specific domain (e.g., google.com)
-  /// using the local CA. This is used for MITM.
+  /// Generates a certificate for a specific domain, SIGNED by the Local Root CA.
   Future<Map<String, String>> generateDomainCertificate(String domain) async {
-    // This is a simplified version. In a real MITM, you'd use the CA to sign a new cert.
-    // For this blueprint, we'll use a basic self-signed or CA-signed cert logic.
-    // basic_utils provides X509Utils.generateSelfSignedCertificate which we can adapt.
+    if (_caPrivateKey == null || _caCertPem == null) {
+      throw Exception("CA not initialized");
+    }
+
+    // 1. Generate key pair for the leaf certificate
+    final leafKeyPair = CryptoUtils.generateRSAKeyPair(2048);
+    final leafPrivateKey = leafKeyPair.privateKey as RSAPrivateKey;
+
+    // 2. Define Certificate attributes
+    final subject = 'CN=$domain, O=MozPN MITM, C=IR';
+    final issuer = X509Utils.getSubjectFromPem(_caCertPem!);
     
-    final keyPair = CryptoUtils.generateRSAKeyPair(2048);
-    final cert = X509Utils.generateSelfSignedCertificate(
-      keyPair.privateKey as RSAPrivateKey,
-      '', // Subject
-      365,
-      commonName: domain,
-      organization: 'MasterHttpRelayVPN MITM',
+    // 3. Generate the certificate and SIGN it with the CA's private key
+    // Note: basic_utils.X509Utils.generateCertificate is ideal for this.
+    final serialNumber = BigInt.from(Random().nextInt(1000000000));
+    
+    final leafCertPem = X509Utils.generateCertificate(
+      leafPrivateKey, // The public key of the leaf will be extracted from this
+      issuer, // Issuer from our Root CA
+      subject, // Subject is the target domain
+      leafKeyPair.publicKey as RSAPublicKey,
+      serialNumber.toString(),
+      DateTime.now(),
+      DateTime.now().add(const Duration(days: 365)),
+      signingKey: _caPrivateKey!, // THE MAGIC: Signed by our Root CA's private key
+      isCA: false,
     );
 
     return {
-      'cert': cert,
-      'key': CryptoUtils.encodeRSAPrivateKeyToPem(keyPair.privateKey as RSAPrivateKey),
+      'cert': leafCertPem,
+      'key': CryptoUtils.encodeRSAPrivateKeyToPem(leafPrivateKey),
     };
+  }
+
+  Future<String> getCACertPem() async {
+    if (_caCertPem == null) await init();
+    return _caCertPem!;
   }
 }

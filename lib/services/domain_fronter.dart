@@ -20,22 +20,22 @@ class DomainFronter {
   }) async {
     SecureSocket? socket;
     try {
-      // 1. Connect to Raw Google IP, but Spoof SNI to www.google.com
+      // 1. Connect with SNI Spoofing
       socket = await SecureSocket.connect(
         googleIp,
         443,
-        hostName: sniHost, // THIS IS THE SNI SPOOFING MAGIC!
+        hostName: sniHost,
         supportedProtocols: ['http/1.1'],
-        onBadCertificate: (_) => true, // Ignore cert mismatch for the spoofed SNI
+        onBadCertificate: (_) => true,
       );
 
-      // 2. Prepare JSON Payload for Apps Script
+      // 2. Prepare GAS Payload
       final Map<String, dynamic> payload = {
         "k": authPassword,
         "m": method,
         "u": targetUrl,
         "h": headers ?? {},
-        "r": false, // Don't follow redirects automatically
+        "r": false,
       };
 
       if (bodyBytes != null && bodyBytes.isNotEmpty) {
@@ -45,8 +45,7 @@ class DomainFronter {
       final String jsonBody = jsonEncode(payload);
       final List<int> jsonBytes = utf8.encode(jsonBody);
 
-      // 3. Build Raw HTTP POST Request
-      // We must target the Apps Script URL but use the Host header to distinguish it
+      // 3. Build Raw HTTP Request
       final String requestHeader = 
           "POST /macros/s/$scriptId/exec HTTP/1.1\r\n" +
           "Host: $scriptHost\r\n" +
@@ -54,48 +53,64 @@ class DomainFronter {
           "Content-Length: ${jsonBytes.length}\r\n" +
           "Connection: close\r\n\r\n";
 
-      // 4. Send Request
       socket.add(utf8.encode(requestHeader));
       socket.add(jsonBytes);
       await socket.flush();
 
-      // 5. Read Response
-      final List<int> responseData = [];
-      await socket.listen((data) {
-        responseData.addAll(data);
-      }).asFuture();
-
-      return _parseRawHttpResponse(responseData);
+      // 4. Read Response with Chunked handling
+      return await _readAndParseResponse(socket);
     } catch (e) {
-      return {
-        "s": 500,
-        "error": e.toString(),
-      };
+      return {"s": 500, "error": e.toString()};
     } finally {
       socket?.destroy();
     }
   }
 
-  Map<String, dynamic> _parseRawHttpResponse(List<int> rawData) {
-    final String fullResponse = utf8.decode(rawData, allowMalformed: true);
-    
-    // Find the body of the HTTP response (after \r\n\r\n)
-    final int bodyStartIndex = fullResponse.indexOf('\r\n\r\n');
-    if (bodyStartIndex == -1) {
-      return {"s": 500, "error": "Invalid HTTP response format"};
+  Future<Map<String, dynamic>> _readAndParseResponse(Stream<List<int>> stream) async {
+    final List<int> responseBuffer = [];
+    await for (var chunk in stream) {
+      responseBuffer.addAll(chunk);
     }
 
-    final String body = fullResponse.substring(bodyStartIndex + 4);
-    
+    final String fullResponse = utf8.decode(responseBuffer, allowMalformed: true);
+    final int headerEnd = fullResponse.indexOf('\r\n\r\n');
+    if (headerEnd == -1) return {"s": 500, "error": "Invalid HTTP response"};
+
+    final String headerPart = fullResponse.substring(0, headerEnd);
+    final String bodyPart = fullResponse.substring(headerEnd + 4);
+
+    // Handle Chunked Transfer-Encoding
+    String finalBody = bodyPart;
+    if (headerPart.toLowerCase().contains("transfer-encoding: chunked")) {
+      finalBody = _decodeChunked(bodyPart);
+    }
+
     try {
-      // The body should be the JSON returned by our Apps Script: { "s": status, "h": headers, "b": "base64..." }
-      return jsonDecode(body);
+      return jsonDecode(finalBody);
     } catch (e) {
       return {
         "s": 500,
-        "error": "Failed to parse GAS response JSON: ${e.toString()}",
-        "raw_body": body,
+        "error": "Failed to parse JSON: $e",
+        "raw_body": finalBody,
       };
     }
+  }
+
+  String _decodeChunked(String body) {
+    StringBuffer decoded = StringBuffer();
+    int pos = 0;
+    while (pos < body.length) {
+      int lineEnd = body.indexOf('\r\n', pos);
+      if (lineEnd == -1) break;
+      
+      String hexSize = body.substring(pos, lineEnd).trim();
+      int size = int.parse(hexSize, radix: 16);
+      if (size == 0) break;
+
+      pos = lineEnd + 2;
+      decoded.write(body.substring(pos, pos + size));
+      pos += size + 2; // +2 for \r\n
+    }
+    return decoded.toString();
   }
 }
