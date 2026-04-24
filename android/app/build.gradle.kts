@@ -7,7 +7,14 @@ plugins {
 
 android {
     namespace = "com.example.moz_pn"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
+    ndkVersion = "27.3.13750724"
+    buildToolsVersion = "37.0.0"
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,17 +30,27 @@ android {
         applicationId = "com.example.moz_pn"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 24
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            val baseName = "MozPN"
+            val version = variant.versionName
+            val type = variant.buildType.name
+            output.outputFileName = "${baseName}-${type}-v${version}.apk"
         }
     }
 }

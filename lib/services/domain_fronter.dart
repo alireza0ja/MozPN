@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 
 class DomainFronter {
   final String googleIp = '216.239.38.120';
@@ -18,13 +17,14 @@ class DomainFronter {
     Map<String, String>? headers,
     List<int>? bodyBytes,
   }) async {
+    Socket? tcpSocket;
     SecureSocket? socket;
     try {
-      // 1. Connect with SNI Spoofing
-      socket = await SecureSocket.connect(
-        googleIp,
-        443,
-        hostName: sniHost,
+      // 1. Connect with SNI Spoofing (TCP first, then upgrade to Secure)
+      tcpSocket = await Socket.connect(googleIp, 443);
+      socket = await SecureSocket.secure(
+        tcpSocket,
+        host: sniHost,
         supportedProtocols: ['http/1.1'],
         onBadCertificate: (_) => true,
       );
@@ -47,10 +47,10 @@ class DomainFronter {
 
       // 3. Build Raw HTTP Request
       final String requestHeader = 
-          "POST /macros/s/$scriptId/exec HTTP/1.1\r\n" +
-          "Host: $scriptHost\r\n" +
-          "Content-Type: application/json\r\n" +
-          "Content-Length: ${jsonBytes.length}\r\n" +
+          "POST /macros/s/$scriptId/exec HTTP/1.1\r\n"
+          "Host: $scriptHost\r\n"
+          "Content-Type: application/json\r\n"
+          "Content-Length: ${jsonBytes.length}\r\n"
           "Connection: close\r\n\r\n";
 
       socket.add(utf8.encode(requestHeader));
@@ -63,6 +63,7 @@ class DomainFronter {
       return {"s": 500, "error": e.toString()};
     } finally {
       socket?.destroy();
+      tcpSocket?.destroy();
     }
   }
 

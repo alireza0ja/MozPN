@@ -41,7 +41,6 @@ class MasterVpnApp extends StatelessWidget {
           primary: Color(0xFFFFD300),
           secondary: Color(0xFFFFD300),
           surface: Color(0xFF121212),
-          background: Color(0xFF000000),
         ),
         textTheme: const TextTheme(
           displayLarge: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),

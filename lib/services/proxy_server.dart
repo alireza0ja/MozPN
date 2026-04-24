@@ -25,16 +25,14 @@ class ProxyServer {
       
       // Start HTTP Proxy Server
       _httpServer = await ServerSocket.bind('127.0.0.1', httpPort);
-      print("HTTP Proxy listening on 127.0.0.1:$httpPort");
       _httpServer!.listen(_handleHttpClient);
 
       // Start SOCKS5 Server (Required for tun2socks)
       _socksServer = await ServerSocket.bind('127.0.0.1', socksPort);
-      print("SOCKS5 Server listening on 127.0.0.1:$socksPort");
       _socksServer!.listen(_handleSocksClient);
 
     } catch (e) {
-      print("Failed to start proxy servers: $e");
+      // Failed to start proxy servers
     }
   }
 
@@ -70,7 +68,6 @@ class ProxyServer {
         await _handleHttpRequest(client, method, url, lines, headerData);
       }
     } catch (e) {
-      print("HTTP Proxy Error: $e");
       client.destroy();
     }
   }
@@ -91,7 +88,7 @@ class ProxyServer {
       client.add(utf8.encode("HTTP/1.1 200 Connection Established\r\n\r\n"));
       await client.flush();
 
-      // 2. Upgrade to Secure Server (MITM)
+      // 2. Upgrade to Secure Server (MITM with CA certificate)
       String domain = url.contains(':') ? url.split(':')[0] : url;
       final certData = await certManager.generateDomainCertificate(domain);
 
@@ -99,29 +96,26 @@ class ProxyServer {
         ..useCertificateChainBytes(utf8.encode(certData['cert']!))
         ..usePrivateKeyBytes(utf8.encode(certData['key']!));
 
-      // USE secureServer for MITM
+      // Perform MITM to decrypt HTTPS
       final secureClient = await SecureSocket.secureServer(
         client,
         context,
       );
 
-      // 3. Handle encrypted traffic inside TLS
+      // 3. Handle decrypted traffic inside TLS
       secureClient.listen((data) async {
         await _processSecureTraffic(secureClient, data, domain);
       }, onError: (e) => secureClient.destroy(), onDone: () => secureClient.destroy());
 
     } catch (e) {
-      print("HTTPS CONNECT Error for $url: $e");
       client.destroy();
     }
   }
 
   Future<void> _processSecureTraffic(SecureSocket client, List<int> initialData, String domain) async {
-    // This needs a more robust HTTP parser to handle multiple requests on same socket (Keep-Alive)
-    // For this blueprint, we implement a basic one-shot or simplified stream handler.
     try {
       String requestStr = utf8.decode(initialData, allowMalformed: true);
-      if (!requestStr.contains('\r\n\r\n')) return; // Incomplete header
+      if (!requestStr.contains('\r\n\r\n')) return;
 
       List<String> lines = requestStr.split('\r\n');
       List<String> firstLineParts = lines[0].split(' ');
@@ -189,7 +183,9 @@ class ProxyServer {
       String header = "HTTP/1.1 $status ${_getStatusText(status)}\r\n";
       respHeaders.forEach((k, v) {
         if (v is List) {
-          for (var item in v) header += "$k: $item\r\n";
+          for (var item in v) {
+            header += "$k: $item\r\n";
+          }
         } else {
           header += "$k: $v\r\n";
         }
@@ -237,7 +233,7 @@ class ProxyServer {
       client.add(Uint8List.fromList([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
       
       if (port == 443) {
-        // Upgrade to MITM TLS
+        // MITM HTTPS with certificate
         await _handleHttpsConnect(client, host);
       } else {
         // Standard HTTP over SOCKS

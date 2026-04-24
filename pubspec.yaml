@@ -40,8 +40,9 @@ dependencies:
   shared_preferences: ^2.2.2
   provider: ^6.1.1
   lottie: ^3.1.0
-  pointycastle: ^3.7.3
-  basic_utils: ^5.6.2
+  pointycastle: ^4.0.0
+  basic_utils: ^5.8.2
+  http: ^1.2.1
 
 dev_dependencies:
   flutter_test:
@@ -52,14 +53,12 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/app_icon.png"
+  image_path: "assets/icon/app_icon.png"
   min_sdk_android: 21
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
-
-# The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/icon/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
